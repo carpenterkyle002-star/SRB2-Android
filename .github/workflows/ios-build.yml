@@ -1,4 +1,13 @@
-name: Build iOS IPA
+cmake .. \
+  -DCMAKE_TOOLCHAIN_FILE=../CMake/iOS.toolchain.cmake \   # ← this file does NOT exist
+  -DPLATFORM=OS64COMBINED \
+  ...
+You correctly clone leetal/ios-cmake, but then you ignore it and still point CMake at a non-existent path (../CMake/iOS.toolchain.cmake).
+There is no CMake/iOS.toolchain.cmake (or even a capital-C CMake folder) in the repository — only a lowercase cmake/ folder with modules.
+Android CI is succeeding (the Gradle build works), so the Android side is fine.
+Fixed ios-build.yml
+Replace the whole file with this:
+YAMLname: Build iOS IPA
 
 on:
   push:
@@ -6,7 +15,7 @@ on:
 
 jobs:
   build-ios:
-    runs-on: macos-14          # or macos-latest; macos-14 is more predictable for Xcode
+    runs-on: macos-14
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -14,46 +23,61 @@ jobs:
       - name: Install system tools
         run: |
           brew install cmake ninja pkg-config
-          # Note: do NOT rely on brew's sdl2/libpng/etc for iOS.
-          # They are macOS binaries.
 
       - name: Get iOS CMake toolchain
         run: |
           git clone --depth 1 https://github.com/leetal/ios-cmake.git
-          # This gives you ios-cmake/ios.toolchain.cmake
 
       - name: Configure CMake for iOS
         run: |
-          mkdir build && cd build
+          mkdir -p build
+          cd build
           cmake .. \
-            -DCMAKE_TOOLCHAIN_FILE=../CMake/iOS.toolchain.cmake \
-            -DPLATFORM=OS64COMBINED \
+            -G Xcode \
+            -DCMAKE_TOOLCHAIN_FILE=$GITHUB_WORKSPACE/ios-cmake/ios.toolchain.cmake \
+            -DPLATFORM=OS64 \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DDEPLOYMENT_TARGET=13.0 \
+            -DENABLE_BITCODE=OFF \
+            -DENABLE_ARC=OFF \
+            -DENABLE_VISIBILITY=OFF \
             -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
             -Wno-dev
-
 
       - name: Build
         run: |
           cd build
-          # Preferred way after CMake+Xcode generator:
-          cmake --build . --config Release --target srb2 -j$(sysctl -n hw.ncpu)
-          # Alternative if the above fails:
-          # xcodebuild -project *.xcodeproj -scheme srb2 -configuration Release -sdk iphoneos
+          cmake --build . --config Release --target SRB2SDL2 -j$(sysctl -n hw.ncpu) || \
+          cmake --build . --config Release -j$(sysctl -n hw.ncpu)
 
-      - name: Locate the .app
+      - name: Locate the .app / binary
         id: find_app
         run: |
-          # CMake/Xcode usually puts it somewhere under build/
-          APP_PATH=$(find build -name "srb2.app" -type d | head -1)
+          echo "=== Looking for built files ==="
+          find build -type d -name "*.app" 2>/dev/null || true
+          find build -type f -name "srb2*" 2>/dev/null || true
+          find build/bin -type f 2>/dev/null || true
+
+          APP_PATH=$(find build -name "*.app" -type d | head -1)
           if [ -z "$APP_PATH" ]; then
-            echo "Could not find srb2.app"
-            find build -name "*.app" -type d
-            exit 1
+            # Sometimes CMake just produces a binary, not a full .app bundle
+            BIN_PATH=$(find build -type f -executable -name "srb2*" | head -1)
+            if [ -n "$BIN_PATH" ]; then
+              echo "Found binary (no .app yet): $BIN_PATH"
+              echo "app_path=" >> $GITHUB_OUTPUT
+              echo "bin_path=$BIN_PATH" >> $GITHUB_OUTPUT
+            else
+              echo "Could not find srb2.app or binary"
+              exit 1
+            fi
+          else
+            echo "Found app at: $APP_PATH"
+            echo "app_path=$APP_PATH" >> $GITHUB_OUTPUT
+            echo "bin_path=" >> $GITHUB_OUTPUT
           fi
-          echo "Found app at: $APP_PATH"
-          echo "app_path=$APP_PATH" >> $GITHUB_OUTPUT
 
       - name: Package unsigned IPA (for sideloading / jailbreak)
+        if: steps.find_app.outputs.app_path != ''
         run: |
           mkdir -p Payload
           cp -R "${{ steps.find_app.outputs.app_path }}" Payload/
@@ -61,7 +85,15 @@ jobs:
           ls -lh srb2.ipa
 
       - name: Upload IPA
+        if: steps.find_app.outputs.app_path != ''
         uses: actions/upload-artifact@v4
         with:
           name: srb2-ios-ipa
           path: srb2.ipa
+
+      - name: Upload binary (if no .app was produced)
+        if: steps.find_app.outputs.bin_path != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: srb2-ios-binary
+          path: ${{ steps.find_app.outputs.bin_path }}
