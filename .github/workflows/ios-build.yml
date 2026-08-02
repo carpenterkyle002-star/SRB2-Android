@@ -18,11 +18,15 @@ jobs:
       - name: Get iOS CMake toolchain
         run: |
           git clone --depth 1 https://github.com/leetal/ios-cmake.git
+          ls -la ios-cmake/
+          echo "Toolchain path will be: $GITHUB_WORKSPACE/ios-cmake/ios.toolchain.cmake"
 
       - name: Configure CMake for iOS
         run: |
           mkdir -p build
           cd build
+
+          echo "=== Starting CMake configure ==="
           cmake .. \
             -G Xcode \
             -DCMAKE_TOOLCHAIN_FILE=$GITHUB_WORKSPACE/ios-cmake/ios.toolchain.cmake \
@@ -33,7 +37,8 @@ jobs:
             -DENABLE_ARC=OFF \
             -DENABLE_VISIBILITY=OFF \
             -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
-            -Wno-dev
+            -Wno-dev \
+            || (echo "=== CMAKE FAILED ===" && cat CMakeFiles/CMakeError.log 2>/dev/null || true && cat CMakeFiles/CMakeOutput.log 2>/dev/null | tail -100 || true && exit 1)
 
       - name: Build
         run: |
