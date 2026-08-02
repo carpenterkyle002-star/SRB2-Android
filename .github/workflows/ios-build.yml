@@ -1,34 +1,72 @@
 name: Build iOS IPA
-on: [push, workflow_dispatch]
+
+on:
+  push:
+  workflow_dispatch:
 
 jobs:
   build-ios:
-    runs-on: macos-latest
+    runs-on: macos-14          # or macos-latest; macos-14 is more predictable for Xcode
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install Dependencies
+      - name: Install system tools
         run: |
-          brew install sdl2 sdl2_mixer sdl2_net libpng gme zlib
+          brew install cmake ninja pkg-config
+          # Note: do NOT rely on brew's sdl2/libpng/etc for iOS.
+          # They are macOS binaries.
+
+      - name: Get iOS CMake toolchain
+        run: |
+          git clone --depth 1 https://github.com/leetal/ios-cmake.git
+          # This gives you ios-cmake/ios.toolchain.cmake
 
       - name: Configure CMake for iOS
         run: |
-          mkdir build && cd build
-          cmake .. -DCMAKE_TOOLCHAIN_FILE=../CMake/iOS.toolchain.cmake -DPLATFORM=OS64COMBINED
+          mkdir -p build
+          cd build
+          cmake .. \
+            -G Xcode \
+            -DCMAKE_TOOLCHAIN_FILE=$GITHUB_WORKSPACE/ios-cmake/ios.toolchain.cmake \
+            -DPLATFORM=OS64 \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DDEPLOYMENT_TARGET=12.0 \
+            -DENABLE_BITCODE=OFF \
+            -DENABLE_ARC=OFF \
+            -DENABLE_VISIBILITY=OFF
+          # Add any SRB2-specific options your CMakeLists expects here
+          # e.g. -DSRB2_CONFIG_...=ON/OFF
 
-      - name: Compile Game Core
+      - name: Build
         run: |
           cd build
-          xcodebuild -configuration Release -target srb2
+          # Preferred way after CMake+Xcode generator:
+          cmake --build . --config Release --target srb2 -j$(sysctl -n hw.ncpu)
+          # Alternative if the above fails:
+          # xcodebuild -project *.xcodeproj -scheme srb2 -configuration Release -sdk iphoneos
 
-      - name: Package IPA
+      - name: Locate the .app
+        id: find_app
+        run: |
+          # CMake/Xcode usually puts it somewhere under build/
+          APP_PATH=$(find build -name "srb2.app" -type d | head -1)
+          if [ -z "$APP_PATH" ]; then
+            echo "Could not find srb2.app"
+            find build -name "*.app" -type d
+            exit 1
+          fi
+          echo "Found app at: $APP_PATH"
+          echo "app_path=$APP_PATH" >> $GITHUB_OUTPUT
+
+      - name: Package unsigned IPA (for sideloading / jailbreak)
         run: |
           mkdir -p Payload
-          mv build/Release-iphoneos/srb2.app Payload/
-          zip -r srb2.ipa Payload/
+          cp -R "${{ steps.find_app.outputs.app_path }}" Payload/
+          zip -r srb2.ipa Payload
+          ls -lh srb2.ipa
 
-      - name: Upload Finished App Artifact
+      - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
           name: srb2-ios-ipa
