@@ -24,19 +24,13 @@ jobs:
 
       - name: Configure CMake for iOS
         run: |
-          mkdir -p build
-          cd build
+          mkdir build && cd build
           cmake .. \
-            -G Xcode \
-            -DCMAKE_TOOLCHAIN_FILE=$GITHUB_WORKSPACE/ios-cmake/ios.toolchain.cmake \
-            -DPLATFORM=OS64 \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DDEPLOYMENT_TARGET=12.0 \
-            -DENABLE_BITCODE=OFF \
-            -DENABLE_ARC=OFF \
-            -DENABLE_VISIBILITY=OFF
-          # Add any SRB2-specific options your CMakeLists expects here
-          # e.g. -DSRB2_CONFIG_...=ON/OFF
+            -DCMAKE_TOOLCHAIN_FILE=../CMake/iOS.toolchain.cmake \
+            -DPLATFORM=OS64COMBINED \
+            -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
+            -Wno-dev
+
 
       - name: Build
         run: |
