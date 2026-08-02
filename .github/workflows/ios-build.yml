@@ -1,0 +1,35 @@
+name: Build iOS IPA
+on: [push, workflow_dispatch]
+
+jobs:
+  build-ios:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Dependencies
+        run: |
+          brew install sdl2 sdl2_mixer sdl2_net libpng gme zlib
+
+      - name: Configure CMake for iOS
+        run: |
+          mkdir build && cd build
+          cmake .. -DCMAKE_TOOLCHAIN_FILE=../CMake/iOS.toolchain.cmake -DPLATFORM=OS64COMBINED
+
+      - name: Compile Game Core
+        run: |
+          cd build
+          xcodebuild -configuration Release -target srb2
+
+      - name: Package IPA
+        run: |
+          mkdir -p Payload
+          mv build/Release-iphoneos/srb2.app Payload/
+          zip -r srb2.ipa Payload/
+
+      - name: Upload Finished App Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: srb2-ios-ipa
+          path: srb2.ipa
