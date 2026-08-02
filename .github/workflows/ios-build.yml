@@ -1,13 +1,4 @@
-cmake .. \
-  -DCMAKE_TOOLCHAIN_FILE=../CMake/iOS.toolchain.cmake \   # ← this file does NOT exist
-  -DPLATFORM=OS64COMBINED \
-  ...
-You correctly clone leetal/ios-cmake, but then you ignore it and still point CMake at a non-existent path (../CMake/iOS.toolchain.cmake).
-There is no CMake/iOS.toolchain.cmake (or even a capital-C CMake folder) in the repository — only a lowercase cmake/ folder with modules.
-Android CI is succeeding (the Gradle build works), so the Android side is fine.
-Fixed ios-build.yml
-Replace the whole file with this:
-YAMLname: Build iOS IPA
+name: Build iOS IPA
 
 on:
   push:
@@ -50,7 +41,7 @@ jobs:
           cmake --build . --config Release --target SRB2SDL2 -j$(sysctl -n hw.ncpu) || \
           cmake --build . --config Release -j$(sysctl -n hw.ncpu)
 
-      - name: Locate the .app / binary
+      - name: Locate the .app or binary
         id: find_app
         run: |
           echo "=== Looking for built files ==="
@@ -60,7 +51,6 @@ jobs:
 
           APP_PATH=$(find build -name "*.app" -type d | head -1)
           if [ -z "$APP_PATH" ]; then
-            # Sometimes CMake just produces a binary, not a full .app bundle
             BIN_PATH=$(find build -type f -executable -name "srb2*" | head -1)
             if [ -n "$BIN_PATH" ]; then
               echo "Found binary (no .app yet): $BIN_PATH"
@@ -76,7 +66,7 @@ jobs:
             echo "bin_path=" >> $GITHUB_OUTPUT
           fi
 
-      - name: Package unsigned IPA (for sideloading / jailbreak)
+      - name: Package unsigned IPA
         if: steps.find_app.outputs.app_path != ''
         run: |
           mkdir -p Payload
@@ -91,7 +81,7 @@ jobs:
           name: srb2-ios-ipa
           path: srb2.ipa
 
-      - name: Upload binary (if no .app was produced)
+      - name: Upload binary
         if: steps.find_app.outputs.bin_path != ''
         uses: actions/upload-artifact@v4
         with:
